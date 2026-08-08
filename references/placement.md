@@ -27,7 +27,7 @@ Read this when you choose a `spawn-fleet.py` placement, need a non-default flag,
 - `--placement window` does not exist. The script stops before it creates anything and tells you to use `workspace` or `split`.
 - `--direction left` lands like `right`, and `up` lands like `down`. cmux-gtk splits by orientation and always puts the new pane second. The script prints a note when you ask for a direction it cannot honour.
 - `split` has no caller identity to read, so it uses the selected workspace and its focused pane instead. That is the caller whenever the caller is the pane the user last touched. Check the split landed where you meant.
-- The cmux window must be on a visible desktop for the whole spawn. cmux-gtk builds a pane's terminal only while its window renders, so a spawn started behind a hidden window fails with a message that says so, and takes its own empty pane back out.
+- The cmux window must be on a visible desktop for the whole spawn. cmux-gtk builds a pane's terminal only while its window renders, so a spawn started behind a hidden window fails with a message that says so. Sessions already launched keep running, and the script prints their teardown before it exits — run that block, or bring the window up and retry, but do not do both blindly or you end up with two fleets.
 - Teardown closes panes by UUID, and a workspace disappears once its last pane goes. There is nothing extra to close.
 
 ## Teardown syntax per placement

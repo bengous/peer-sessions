@@ -6,6 +6,10 @@ import json
 import os
 import sys
 
+# Keep the import below from writing __pycache__ into an installed skill: a
+# managed directory is often hashed, and a new file there reads as tampering.
+sys.dont_write_bytecode = True
+
 from peer_registry import (
     load_records,
     normalized_name,

@@ -10,6 +10,11 @@ import subprocess
 import sys
 import time
 
+# An installed skill is often a managed directory whose contents are hashed to
+# detect tampering. A __pycache__ written on first run changes that hash and
+# reads as a modified skill, so keep the import below from leaving one.
+sys.dont_write_bytecode = True
+
 from peer_registry import live_records, normalized_name, record_identity, socket_live
 
 

@@ -20,10 +20,15 @@ from peer_registry import live_records, normalized_name, record_identity, socket
 
 UUID = re.compile(r"^[0-9A-Fa-f]{8}(-[0-9A-Fa-f]{4}){3}-[0-9A-Fa-f]{12}$")
 
+# `cmux identify` on cmux-gtk, e.g. `cmux linux v0.62.0-alpha.11`.
+GTK_BANNER = re.compile(r"^cmux \w+ v")
+
 # Drop the parent session vars before the peer starts. A child that inherits
 # CLAUDE_CODE_CHILD_SESSION never publishes its own record, so it stays
-# unreachable. `unset` runs inside the shell cmux opened, which keeps the
-# user's own `claude` shell function and its flags. `env -u` would skip it.
+# unreachable. This is a shell builtin, not `env -u`, because the launch line
+# always reaches a shell — typed into one cmux opened, or handed to cmux as a
+# --command — and `env -u` would run the `claude` binary straight, skipping the
+# user's own `claude` shell function and the flags it adds.
 ENV_HYGIENE = "unset CLAUDE_CODE_CHILD_SESSION CLAUDE_CODE_SESSION_ID"
 
 # cmux-gtk splits by orientation, never by direction, and always puts the new
@@ -45,19 +50,20 @@ SURFACE_READY_TIMEOUT = 45
 
 
 def detect_backend():
-    """Return 'gtk' or 'macos'. cmux-gtk prints a bare line; cmux prints JSON."""
+    """Return 'gtk' or 'macos'. cmux-gtk answers `cmux linux v…`; cmux answers JSON.
+
+    Only that banner picks the Linux path. Anything else — JSON, an error, a
+    dead server — leaves the macOS path exactly as it was, because cmux on
+    macOS exits 0 on some errors and must not be mistaken for cmux-gtk.
+    """
     try:
         result = subprocess.run(["cmux", "identify"], capture_output=True, text=True)
     except FileNotFoundError:
         sys.exit("error: cmux is not on PATH. Install cmux (macOS) or cmux-gtk (Linux).")
     output = (result.stdout + result.stderr).strip()
-    if result.returncode != 0:
-        sys.exit(f"error: cmux identify failed. Is cmux running?\n  → {output}")
-    try:
-        json.loads(output)
-    except ValueError:
-        return "gtk"
-    return "macos"
+    if result.returncode != 0 or output.startswith("Error"):
+        return "macos"
+    return "gtk" if GTK_BANNER.match(output) else "macos"
 
 
 def cmux(*args):
@@ -157,19 +163,25 @@ def select_workspace_gtk(workspace):
     cmux_gtk("workspace", "select", str(workspace_index_gtk(workspace)))
 
 
-def gtk_orientation(direction, count):
-    """Map a direction onto a cmux-gtk split orientation, and warn about the fit."""
+class FleetError(RuntimeError):
+    """A builder gave up partway. Carries whatever it had already created.
+
+    Without this the sessions from earlier in the run keep running with their
+    addresses unprinted, and the teardown block never reaches the user.
+    """
+
+    def __init__(self, message, layout):
+        super().__init__(message)
+        self.layout = layout
+
+
+def gtk_orientation(direction):
+    """Map a direction onto a cmux-gtk split orientation, and say what is lost."""
     if direction in ("left", "up"):
         landing = "right" if direction == "left" else "down"
         print(
             f"note: cmux-gtk always puts the new pane second, so "
             f"--direction {direction} lands like --direction {landing}.",
-            file=sys.stderr,
-        )
-    if count > 3 and direction in ("right", "left"):
-        print(
-            f"note: {count} side panes get narrow. "
-            "Use --direction down, or --placement workspace.",
             file=sys.stderr,
         )
     return GTK_ORIENTATION[direction]
@@ -303,16 +315,7 @@ def start_session(workspace, surface, directory, command):
 
 def start_session_gtk(surface, directory, command):
     """Type a launch command into a pane, once that pane can take one."""
-    try:
-        wait_for_surface_gtk(surface)
-    except RuntimeError:
-        # A pane that never grew a terminal is dead weight, and every retry
-        # would leave one more behind. Take it back out.
-        try:
-            cmux_gtk("surface", "close", surface)
-        except RuntimeError:
-            pass
-        raise
+    wait_for_surface_gtk(surface)
     cmux_gtk("surface", "send-text", "--surface", surface, launch_line(directory, command))
     cmux_gtk("surface", "send-key", "Return", "--surface", surface)
 
@@ -366,23 +369,33 @@ def build_splits_gtk(specs, launch_cmd, caller, direction, focus):
             "error: --placement split needs a cmux terminal. "
             "Run it inside cmux, or use --placement workspace."
         )
-    orientation = gtk_orientation(direction, len(specs))
+    if len(specs) > 3 and direction in ("right", "left"):
+        print(
+            f"note: {len(specs)} side panes get narrow. "
+            "Use --direction down, or --placement workspace.",
+            file=sys.stderr,
+        )
+    orientation = gtk_orientation(direction)
     surfaces = []
-    for name, directory in specs:
-        surface = split_gtk(workspace, anchor, orientation)
-        surfaces.append(surface)
-        start_session_gtk(surface, directory, launch_cmd(name))
-        anchor = surface  # chain, so the panes line up in spec order
-    # Splitting leaves the focus on the anchor, and the loop moved that anchor
-    # down the chain. Put the focus where --focus asked for it.
-    cmux_gtk("surface", "focus", surfaces[-1] if focus == "true" else caller["surface"])
-    return {
+    layout = {
         "placement": "split",
         "window": None,
         "workspace": workspace,
         "workspaces": [],
         "surfaces": surfaces,
     }
+    for name, directory in specs:
+        try:
+            surface = split_gtk(workspace, anchor, orientation)
+            surfaces.append(surface)
+            start_session_gtk(surface, directory, launch_cmd(name))
+        except RuntimeError as error:
+            raise FleetError(str(error), layout) from error
+        anchor = surface  # chain, so the panes line up in spec order
+    # A split moves the focus onto the pane it just made, and the loop walked
+    # the anchor down the chain. Put the focus where --focus asked for it.
+    cmux_gtk("surface", "focus", surfaces[-1] if focus == "true" else caller["surface"])
+    return layout
 
 
 def build_workspaces_gtk(
@@ -397,37 +410,47 @@ def build_workspaces_gtk(
     """
     workspaces = []
     surfaces = []
-    orientation = gtk_orientation(direction, per_workspace)
+    # One session per workspace never splits, so say nothing about direction.
+    orientation = gtk_orientation(direction) if per_workspace > 1 else None
     groups = [
         specs[index : index + per_workspace]
         for index in range(0, len(specs), per_workspace)
     ]
+    layout = {
+        "placement": "workspace",
+        "window": None,
+        "workspaces": workspaces,
+        "surfaces": surfaces,
+    }
     for group_index, group in enumerate(groups, 1):
         first_name, first_dir = group[0]
-        # `workspace new` takes no command, so the opening pane gets typed into
-        # like every other one. It also selects the workspace it just made.
-        workspace = cmux_gtk(
-            "workspace",
-            "new",
-            "--directory",
-            first_dir,
-            "--title",
-            f"{prefix}-{group_index}",
-        )["workspace_id"]
-        workspaces.append(workspace)
-        panels = cmux_gtk("surface", "list", "--workspace", workspace).get("panels")
-        if not panels:
-            raise RuntimeError(f"workspace {workspace} opened with no pane")
-        anchor = panels[0]["id"]
-        surfaces.append(anchor)
-        start_session_gtk(anchor, first_dir, launch_cmd(first_name))
+        try:
+            # `workspace new` takes no command, so the opening pane gets typed
+            # into like every other one. It also selects what it just made.
+            workspace = cmux_gtk(
+                "workspace",
+                "new",
+                "--directory",
+                first_dir,
+                "--title",
+                f"{prefix}-{group_index}",
+            )["workspace_id"]
+            workspaces.append(workspace)
+            panels = cmux_gtk("surface", "list", "--workspace", workspace).get("panels")
+            if not panels:
+                raise RuntimeError(f"workspace {workspace} opened with no pane")
+            anchor = panels[0]["id"]
+            surfaces.append(anchor)
+            start_session_gtk(anchor, first_dir, launch_cmd(first_name))
 
-        for name, directory in group[1:]:
-            surface = split_gtk(workspace, anchor, orientation)
-            surfaces.append(surface)
-            start_session_gtk(surface, directory, launch_cmd(name))
-            anchor = surface
-    return {"window": None, "workspaces": workspaces, "surfaces": surfaces}
+            for name, directory in group[1:]:
+                surface = split_gtk(workspace, anchor, orientation)
+                surfaces.append(surface)
+                start_session_gtk(surface, directory, launch_cmd(name))
+                anchor = surface
+        except RuntimeError as error:
+            raise FleetError(str(error), layout) from error
+    return layout
 
 
 def build_workspaces(specs, launch_cmd, window, prefix, per_workspace, direction, focus):
@@ -463,6 +486,24 @@ def build_workspaces(specs, launch_cmd, window, prefix, per_workspace, direction
             surfaces.append(surface)
             start_session(workspace, surface, directory, launch_cmd(name))
     return {"window": window, "workspaces": workspaces, "surfaces": surfaces}
+
+
+def settle_focus(backend, layout, caller, focus):
+    """Put the UI where --focus asked, once every session has booted."""
+    if not layout["workspaces"]:
+        return
+    if focus == "true":
+        # A new window opens on its own default workspace, so `--focus true` on
+        # the first workspace does not stick. Select it again here. An earlier
+        # switch races the launch command cmux types into the new shell.
+        if backend == "gtk":
+            select_workspace_gtk(layout["workspaces"][0])
+        else:
+            cmux("select-workspace", "--workspace", layout["workspaces"][0])
+    elif backend == "gtk" and caller.get("workspace"):
+        # `workspace new` always selects what it creates, so cmux-gtk needs the
+        # caller's workspace put back by hand to honour `--focus false`.
+        select_workspace_gtk(caller["workspace"])
 
 
 def main():
@@ -533,33 +574,41 @@ def main():
         )
 
     caller = caller_context_gtk() if backend == "gtk" else caller_context()
+    cleanup = print_cleanup_gtk if backend == "gtk" else print_cleanup
 
-    if placement == "split":
-        build = build_splits_gtk if backend == "gtk" else build_splits
-        layout = build(specs, launch_cmd, caller, args.direction, focus)
-        print(f"workspace {layout['workspace']} (this one)")
-        print(f"panes {', '.join(layout['surfaces'])}")
-    else:
-        if placement == "window":
-            window = cmux("new-window").split()[-1]
-            print(f"window {window} (new)")
-        elif backend == "gtk":
-            window = None
+    try:
+        if placement == "split":
+            build = build_splits_gtk if backend == "gtk" else build_splits
+            layout = build(specs, launch_cmd, caller, args.direction, focus)
+            print(f"workspace {layout['workspace']} (this one)")
+            print(f"panes {', '.join(layout['surfaces'])}")
         else:
-            window = caller.get("window")
-            print(f"window {window or '(focused)'} (this one)")
-        build = build_workspaces_gtk if backend == "gtk" else build_workspaces
-        layout = build(
-            specs,
-            launch_cmd,
-            window,
-            args.prefix,
-            args.per_workspace,
-            args.direction,
-            focus,
-        )
-        layout["placement"] = placement
-        print(f"workspaces {', '.join(layout['workspaces'])}")
+            if placement == "window":
+                window = cmux("new-window").split()[-1]
+                print(f"window {window} (new)")
+            elif backend == "gtk":
+                window = None
+            else:
+                window = caller.get("window")
+                print(f"window {window or '(focused)'} (this one)")
+            build = build_workspaces_gtk if backend == "gtk" else build_workspaces
+            layout = build(
+                specs,
+                launch_cmd,
+                window,
+                args.prefix,
+                args.per_workspace,
+                args.direction,
+                focus,
+            )
+            layout["placement"] = placement
+            print(f"workspaces {', '.join(layout['workspaces'])}")
+    except FleetError as error:
+        # Sessions from earlier in the run are alive. Print their teardown, or
+        # they stay behind unaddressed and the next attempt adds more.
+        print(f"error: {error}", file=sys.stderr)
+        cleanup(new_matching_records(before, wanted), error.layout)
+        return 1
 
     started = time.time()
     records = []
@@ -574,21 +623,7 @@ def main():
     elapsed = int(time.time() - started)
     records = new_matching_records(before, wanted)
     ready = ready_by_name(records)
-    cleanup = print_cleanup_gtk if backend == "gtk" else print_cleanup
 
-    if focus == "true" and layout["workspaces"]:
-        # A new window opens on its own default workspace, so `--focus true` on
-        # the first workspace does not stick. Select it again here, after every
-        # session has booted. An earlier switch races the launch command that
-        # cmux types into the new shell, and scrambles it.
-        if backend == "gtk":
-            select_workspace_gtk(layout["workspaces"][0])
-        else:
-            cmux("select-workspace", "--workspace", layout["workspaces"][0])
-    elif backend == "gtk" and layout["workspaces"] and caller.get("workspace"):
-        # `workspace new` always selects what it creates, so cmux-gtk needs the
-        # caller's workspace put back by hand to honour `--focus false`.
-        select_workspace_gtk(caller["workspace"])
     for name, _ in specs:
         if name in ready:
             record = ready[name]
@@ -598,6 +633,13 @@ def main():
             )
         else:
             print(f"- {name:<24} did not register a live socket in {args.timeout}s")
+
+    # Last, so that a workspace closed under us during the wait costs a note
+    # rather than the addresses printed above and the teardown printed below.
+    try:
+        settle_focus(backend, layout, caller, focus)
+    except RuntimeError as error:
+        print(f"note: could not move the focus: {error}", file=sys.stderr)
 
     missing = [name for name, _ in specs if name not in ready]
     if missing:

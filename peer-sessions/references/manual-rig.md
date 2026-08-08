@@ -126,7 +126,7 @@ A=$(cmux --json surface list --workspace $WS | jq -r .result.panels[0].id)
 LAUNCH='unset CLAUDE_CODE_CHILD_SESSION CLAUDE_CODE_SESSION_ID; cd /tmp/lab && claude --name alpha'
 until cmux --json surface read-screen --surface $A >/dev/null 2>&1; do sleep 0.5; done
 cmux --json surface send-text --surface $A "$LAUNCH"
-cmux --json surface send-key Return --surface $A          # the key is Return, not Enter
+cmux --json surface send-key Return --surface $A          # Return or Enter, both work
 
 cmux --json workspace select "$(cmux --json tree | jq -r \
   ".result.workspaces[] | select(.id==\"$WS\") | .index")"

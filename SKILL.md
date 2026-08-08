@@ -12,18 +12,31 @@ The loop: spawn a fleet → send a brief to each peer → end your turn → repl
 ## 1. Spawn
 
 ```bash
-python3 ~/.claude/skills/peer-sessions/scripts/spawn-fleet.py --window \
+python3 ~/.claude/skills/peer-sessions/scripts/spawn-fleet.py --placement window \
   orbits:/tmp/lab/orbits planets:/tmp/lab/planets sun:/tmp/lab/sun
 ```
-```
-window F8464A83-...
-+ orbits    uds:/tmp/cc-socks/17466.sock
-+ planets   uds:/tmp/cc-socks/17398.sock
-+ sun       uds:/tmp/cc-socks/17585.sock
-3 ready in 10s.
+
+Each argument is `NAME:DIR`. The script prints each session's `uds:` address and the exact teardown commands, returns when every session is addressable, and names each session that stalled.
+
+`--placement` says where the fleet appears. You choose it. Ask the user only when the choice changes their screen and you cannot tell what they want.
+
+| Placement | Where the peers land | Pick it when |
+|---|---|---|
+| `split` | new panes beside your own pane, in your workspace | 1-3 peers, short work, the user watches you work. Your pane keeps the focus. |
+| `workspace` (default) | new workspaces in your window | 3+ peers, or work that runs for minutes. The user's current screen stays clean, and one tab click reaches the fleet. |
+| `window` | a new window, with the workspaces inside it | a big fleet, a screen recording, or a second monitor. |
+
+Every other flag (`--direction`, `--focus`, `--per-workspace`, `--model`, `--claude-arg`, …) and the per-placement edge cases: read `references/placement.md`.
+
+Resolve one existing target without wading through the whole registry:
+
+```bash
+python3 ~/.claude/skills/peer-sessions/scripts/peer-addr.py \
+  --name worker-fix --details
+python3 ~/.claude/skills/peer-sessions/scripts/peer-addr.py --pid 66826 --json
 ```
 
-Each argument is `NAME:DIR`. Flags: `--window` (own window), `--per-workspace 1`, `--model`, `--claude-arg <flag>` (repeatable escape hatch). The script returns when each session is addressable. The script names each session that stalled.
+Filters preserve duplicate names by returning every matching PID. `--json` is the stable interface for scripts. A `?` row means a sandbox allowed the registry read but denied the active socket check; rerun with process/socket access before messaging.
 
 Sessions start with `--permission-mode auto`. This is the only mode that works with no human present. An `--allowedTools` list stalls on the first MCP tool that is not in the list. `--dangerously-skip-permissions` makes the receiver hold inbound messages for human approval. The peer then never sees your brief.
 
@@ -39,16 +52,14 @@ SendMessage(to: "uds:/tmp/cc-socks/17466.sock", message: "...")
 
 **The first send with a bare name always bounces** — "not an agent in this conversation, re-send with the ref". That is a confirmation, not a failure. Copy the `[ref]` from the error and send again. Send all briefs in one batch. They bounce together and you re-send them together. A `uds:` address does not bounce.
 
-Each brief that expects a reply must end with your literal address (from `peer-addr.py --me`):
+Each brief that expects a reply must end with your literal address (from `peer-addr.py --me`), because the peer cannot find out who you are:
 
 ```
 When done, message me back:
 SendMessage(to: "uds:/tmp/cc-socks/4667.sock", message: "...")
 ```
 
-The peer cannot find out who you are. Do not make the peer guess. Ask for a fixed reply format ("<name> done: <URL>") — replies from a large fleet then collate with no work. Add a scope guard too ("research and write only, do not touch <repo>"). Peers obey it.
-
-Two rules: `success: true` means the message arrived, not that the peer did the work. A send is one-way — say clearly if you want a reply.
+Ask for a fixed reply format ("<name> done: <URL>") so a large fleet collates with no work, and add a scope guard ("research and write only, do not touch <repo>") — peers obey it. Two rules: `success: true` means the message arrived, not that the peer did the work. A send is one-way — say clearly if you want a reply.
 
 ## 3. End your turn
 
@@ -56,21 +67,13 @@ When the briefs are out, **stop**. A peer reply IS the notification. The reply a
 
 ### Calling from Codex
 
-Codex does not expose Claude Code's native `SendMessage` tool or `CLAUDE_CODE_MESSAGING_SOCKET`. Never fake or implement the Unix-socket protocol. Use a real temporary Claude Code session as the relay.
-
-For a two-way request, keep the relay alive, verify that `peer-addr.py` shows its `uds:` inbox, and put that literal return address in the message. If the relay does not register an inbox, send one-way and recover the receiving session's answer from its JSONL transcript. In both cases, verify `success: true`, preserve the message ID, and kill only the temporary relay when finished.
-
-Read `references/codex-bridge.md` before operating this path.
+Codex has no native `SendMessage` tool and no messaging socket. Never fake or implement the Unix-socket protocol — use a real temporary Claude Code session as the relay, and recover truncated replies from transcripts with `scripts/peer-inbox.py`. Read `references/codex-bridge.md` before operating this path.
 
 ## 4. Tear down
 
-**When you close the UI, the sessions do not stop.** `close-window` and `close-workspace` return `OK` and each `claude` process stays alive as an addressable orphan. Kill first, then close, then check:
+**When you close the UI, the sessions do not stop.** Every cmux close command returns `OK` and each `claude` process stays alive as an addressable orphan. So: **kill first, close second**, then confirm with `peer-addr.py`.
 
-```bash
-kill <pid> <pid>                                    # pids from peer-addr.py
-cmux close-window --window <uuid>                   # can return OK and not close — see troubleshooting
-python3 ~/.claude/skills/peer-sessions/scripts/peer-addr.py   # confirm gone
-```
+Run the teardown the spawn script printed — it matches the placement and uses durable UUIDs. Close only what you made: a `split` fleet sits in the user's own workspace, so closing that workspace closes the user's work too. Hand-written teardown syntax: `references/placement.md`.
 
 ## When something fails
 

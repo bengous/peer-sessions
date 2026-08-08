@@ -24,11 +24,11 @@ spawn a fleet → send a brief to each peer → end your turn → replies arrive
 ```
 
 ```bash
-python3 ~/.claude/skills/peer-sessions/scripts/spawn-fleet.py --window \
+python3 ~/.claude/skills/peer-sessions/scripts/spawn-fleet.py --placement window \
   orbits:/tmp/lab/orbits planets:/tmp/lab/planets sun:/tmp/lab/sun
 ```
 ```
-window F8464A83-...
+window F8464A83-... (new)
 + orbits    uds:/tmp/cc-socks/17466.sock
 + planets   uds:/tmp/cc-socks/17398.sock
 + sun       uds:/tmp/cc-socks/17585.sock
@@ -37,15 +37,31 @@ window F8464A83-...
 
 Then send each peer a brief that ends with your own address, and stop. A peer reply is the notification — it wakes you as a new turn, so a poll loop only burns tokens.
 
+## Where the fleet appears
+
+`--placement` decides the layout. The script prints the matching teardown commands, so you never close more than you made.
+
+| Placement | Where the peers land | Pick it when |
+|---|---|---|
+| `split` | new panes beside your own pane, in your workspace | 1-3 peers, short work, you want to watch them. Your pane keeps the focus. |
+| `workspace` (default) | new workspaces in your window | 3+ peers, or work that runs for minutes. Your current screen stays clean. |
+| `window` | a new window, with the workspaces inside it | a big fleet, a screen recording, or a second monitor. |
+
+`--direction right|left|up|down` places each new pane, `--focus true|false` decides whether the UI moves to the fleet, and `--per-workspace 1` gives every session its own workspace. See `references/placement.md`.
+
 ## What is in the box
 
 | File | Contents |
 |---|---|
 | `SKILL.md` | The happy path: spawn, brief, end turn, tear down |
-| `references/manual-rig.md` | The cmux object model, manual layouts, `--fork-session` |
+| `references/placement.md` | Every spawn flag, the placement edge cases, teardown syntax |
+| `references/manual-rig.md` | The cmux object model, `--id-format`, manual layouts, `--fork-session` |
 | `references/troubleshooting.md` | The four message checkpoints, the version wall, stale sockets, CLI traps |
-| `scripts/spawn-fleet.py` | Launch N named sessions and wait until each one is addressable |
+| `references/codex-bridge.md` | Reaching a Claude session from Codex through a real relay |
+| `scripts/spawn-fleet.py` | Launch N named sessions in your chosen layout, wait until each is addressable |
 | `scripts/peer-addr.py` | List live sessions, give a reason for each unreachable one, print your own reply address |
+| `scripts/peer-inbox.py` | Recover a peer reply from a transcript when the terminal truncated it |
+| `scripts/peer_registry.py` | Shared registry and liveness helpers used by the other scripts |
 
 ## Things that cost time to learn
 
@@ -54,6 +70,8 @@ Then send each peer a brief that ends with your own address, and stop. A peer re
 - **`success: true` means the message arrived**, not that the peer did the work.
 - **A send is one-way.** If you want a reply, put your own address in the brief and ask for it.
 - **When you close the UI, the sessions do not stop.** Kill the process ids first, then close the window.
+- **A cmux ref is an index, not an identity.** Close one pane and the rest renumber, so a saved ref can point at the wrong pane. The scripts hold UUIDs (`cmux --id-format both`) for this reason.
+- **`cmux close-window` can return `OK` and leave the window open**, and a new window keeps an extra empty shell workspace. `split` and `workspace` placements tear down cleanly from the CLI; `window` may need a Cmd+W.
 
 ## Safety
 

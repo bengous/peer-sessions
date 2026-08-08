@@ -7,10 +7,11 @@ Use this path when Codex must contact a live Claude Code session but has no nati
 Run:
 
 ```bash
-python3 ~/.claude/skills/peer-sessions/scripts/peer-addr.py
+python3 ~/.claude/skills/peer-sessions/scripts/peer-addr.py \
+  --name <target-name> --details
 ```
 
-Use the target's verified `uds:/tmp/cc-socks/<pid>.sock` address. The helper checks the PID and actively connects; socket-file presence alone is not proof. Record the target PID and `sessionId` from `~/.claude/sessions/<pid>.json`.
+Use the target's verified `uds:/tmp/cc-socks/<pid>.sock` address. The helper checks the PID and actively connects; socket-file presence alone is not proof. It also prints the target PID and `sessionId`. If duplicate names match, select by PID and rerun with `--pid <pid> --details`. A `?` row means the sandbox denied socket verification, so rerun with process/socket access before messaging.
 
 ## 2. Start a real relay
 
@@ -31,7 +32,14 @@ SendMessage(to: "uds:/tmp/cc-socks/<relay-pid>.sock",
             summary: "Peer status reply")
 ```
 
-Then read the relay's terminal only when the reply arrives or the session is otherwise quiet. Do not poll a healthy peer fleet continuously.
+Then read the relay's terminal only when the reply arrives or the session is otherwise quiet. Do not poll a healthy peer fleet continuously. A terminal viewport can truncate a long reply, so recover the canonical peer-origin body from the relay transcript before cleanup:
+
+```bash
+python3 ~/.claude/skills/peer-sessions/scripts/peer-inbox.py \
+  --pid <relay-pid> --from <peer-name> --wait 60
+```
+
+The helper accepts only transcript events marked `origin.kind: peer` with a verified peer PID. Use `--json` when another tool will consume the result, or `--session-id` if you already recorded the relay session ID and its registry entry is gone.
 
 ## 3. No relay inbox: verified one-way fallback
 

@@ -1,6 +1,6 @@
 ---
 name: peer-sessions
-description: Run a fleet of Claude Code sessions on this machine and make them talk to each other with SendMessage — launch them in cmux windows, panes and splits, address them correctly, hand out work, and collect their replies. Use this skill whenever the user wants two or more Claude sessions working together, mentions SendMessage, ListAgents, peer sessions, cross-session messaging, or agents messaging each other; whenever they want to spin up sessions in new windows, workspaces, panes or splits to watch them work or film a demo; whenever work should be fanned out to parallel sessions rather than subagents; and especially whenever a send fails with "not an agent in this conversation", "re-send with the ref", or any confusion about why one session cannot reach another. Also use it for tearing those sessions down cleanly afterwards.
+description: Run a fleet of Claude Code sessions on this machine and make them talk to each other with SendMessage — from Claude Code itself or through a real Claude relay when the caller is Codex. Launch them in cmux windows, panes and splits, address them correctly, hand out work, collect or recover replies, and tear them down cleanly. Use whenever the user wants two or more Claude sessions working together, asks Codex to contact an existing Claude session, mentions SendMessage, ListAgents, peer sessions, cross-session messaging, or agents messaging each other; whenever they want sessions in new windows, workspaces, panes or splits; and especially when a send fails with "not an agent in this conversation", "re-send with the ref", or the caller lacks Claude's native messaging socket.
 ---
 
 # Peer sessions
@@ -53,6 +53,14 @@ Two rules: `success: true` means the message arrived, not that the peer did the 
 ## 3. End your turn
 
 When the briefs are out, **stop**. A peer reply IS the notification. The reply arrives as a new user turn and wakes you. A poll loop on the panes burns tokens and blocks the user. Poll only when you must see the screen (filming, or a quiet session) — recipes in `references/manual-rig.md`.
+
+### Calling from Codex
+
+Codex does not expose Claude Code's native `SendMessage` tool or `CLAUDE_CODE_MESSAGING_SOCKET`. Never fake or implement the Unix-socket protocol. Use a real temporary Claude Code session as the relay.
+
+For a two-way request, keep the relay alive, verify that `peer-addr.py` shows its `uds:` inbox, and put that literal return address in the message. If the relay does not register an inbox, send one-way and recover the receiving session's answer from its JSONL transcript. In both cases, verify `success: true`, preserve the message ID, and kill only the temporary relay when finished.
+
+Read `references/codex-bridge.md` before operating this path.
 
 ## 4. Tear down
 

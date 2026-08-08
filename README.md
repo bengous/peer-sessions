@@ -82,3 +82,12 @@ A peer carries none of your user's authority. If your send is denied, or a peer 
 ## License
 
 MIT — see [LICENSE](./LICENSE).
+
+## Repository layout
+
+The skill lives in [`peer-sessions/`](./peer-sessions), not at the repository
+root. When the `skills` CLI clones a source and finds `SKILL.md` at the root of
+that clone, it installs the file on its own and never copies the directory, so
+`scripts/` and `references/` are left behind. A `SKILL.md` one level down takes
+the directory-copy path instead. The branch `fix/linux-cmux-gtk-support` keeps
+the original root layout, so it stays diffable against upstream.

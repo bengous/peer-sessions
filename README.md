@@ -2,7 +2,7 @@
 
 A Claude Code skill for running a **fleet of Claude Code sessions on one machine** and making them talk to each other with `SendMessage`.
 
-Claude Code 2.1.224 added cross-session messaging: one session can send a message to another, and that message arrives as a **user prompt** in the receiving session. This skill turns that primitive into a working loop — spawn a fleet, hand out briefs, collect the replies, tear it all down.
+Claude Code 2.1.224 added cross-session messaging: one session can send a message to another, and that message arrives as a **user prompt** in the receiving session. This skill turns that primitive into a working loop — spawn a fleet, hand out briefs, collect the replies, and tear it down when you ask.
 
 ## Install
 
@@ -20,7 +20,7 @@ Or copy this folder into `~/.claude/skills/peer-sessions/`.
 ## The loop
 
 ```
-spawn a fleet → send a brief to each peer → end your turn → replies arrive as new user turns → tear down
+spawn a fleet → send a brief to each peer → end your turn → replies arrive as new user turns → hand back the teardown
 ```
 
 ```bash
@@ -39,7 +39,7 @@ Then send each peer a brief that ends with your own address, and stop. A peer re
 
 ## Where the fleet appears
 
-`--placement` decides the layout. The script prints the matching teardown commands, so you never close more than you made.
+`--placement` decides the layout. The script prints the matching teardown commands, so you never close more than you made. Teardown is **off by default** — the fleet stays alive, with its context, until you ask for it to go.
 
 | Placement | Where the peers land | Pick it when |
 |---|---|---|
@@ -53,7 +53,7 @@ Then send each peer a brief that ends with your own address, and stop. A peer re
 
 | File | Contents |
 |---|---|
-| `SKILL.md` | The happy path: spawn, brief, end turn, tear down |
+| `SKILL.md` | The happy path: spawn, brief, end turn, hand back the teardown |
 | `references/placement.md` | Every spawn flag, the placement edge cases, teardown syntax |
 | `references/manual-rig.md` | The cmux object model, `--id-format`, manual layouts, `--fork-session` |
 | `references/troubleshooting.md` | The four message checkpoints, the version wall, stale sockets, CLI traps |
@@ -69,6 +69,7 @@ Then send each peer a brief that ends with your own address, and stop. A peer re
 - **Start peers in `--permission-mode auto`.** An `--allowedTools` list stalls on the first tool that is not in the list. `--dangerously-skip-permissions` makes the receiver *hold* inbound messages for human approval, so your brief never reaches the model.
 - **`success: true` means the message arrived**, not that the peer did the work.
 - **A send is one-way.** If you want a reply, put your own address in the brief and ask for it.
+- **Teardown is opt-in.** Claude leaves the fleet running and gives you the commands. It only tears down when you ask, or when you said so up front at spawn time.
 - **When you close the UI, the sessions do not stop.** Kill the process ids first, then close the window.
 - **A cmux ref is an index, not an identity.** Close one pane and the rest renumber, so a saved ref can point at the wrong pane. The scripts hold UUIDs (`cmux --id-format both`) for this reason.
 - **`cmux close-window` can return `OK` and leave the window open**, and a new window keeps an extra empty shell workspace. `split` and `workspace` placements tear down cleanly from the CLI; `window` may need a Cmd+W.

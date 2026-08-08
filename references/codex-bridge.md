@@ -18,10 +18,13 @@ Use the target's verified `uds:/tmp/cc-socks/<pid>.sock` address. The helper che
 Launch a persistent Claude CLI in a PTY or cmux surface:
 
 ```bash
+unset CLAUDE_CODE_CHILD_SESSION CLAUDE_CODE_SESSION_ID
 claude --name codex-peer-relay --permission-mode auto
 ```
 
-Do not use `--dangerously-skip-permissions` or a restrictive `--allowedTools` list. Ask the relay to use its native `SendMessage`; do not write directly to the socket.
+Do not use a restrictive `--allowedTools` list, and unset those two variables first — a relay that inherits them registers nothing and you cannot address it.
+
+Match the relay's permission class to the **target** it will message, because the receiver holds messages that cross a class boundary (`troubleshooting.md`, checkpoint 3). A target in `auto` needs the `auto` relay above. A target started with `--dangerously-skip-permissions` needs a relay started the same way, and the relay is then a bypassed session that you own — keep its brief to the one send. Ask the relay to use its native `SendMessage`; do not write directly to the socket.
 
 For a reply, keep the relay alive and wait until `peer-addr.py` lists it with a reachable `uds:` address. Put that literal address in the outgoing brief:
 

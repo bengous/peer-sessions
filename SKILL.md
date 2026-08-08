@@ -12,7 +12,7 @@ The loop: spawn a fleet → send a brief to each peer → end your turn → repl
 ## 1. Spawn
 
 ```bash
-python3 ~/.claude/skills/peer-sessions/scripts/spawn-fleet.py --placement window \
+python3 ~/.claude/skills/peer-sessions/scripts/spawn-fleet.py \
   orbits:/tmp/lab/orbits planets:/tmp/lab/planets sun:/tmp/lab/sun
 ```
 
@@ -20,11 +20,13 @@ Each argument is `NAME:DIR`. The script prints each session's `uds:` address and
 
 `--placement` says where the fleet appears. You choose it. Ask the user only when the choice changes their screen and you cannot tell what they want.
 
-| Placement | Where the peers land | Pick it when |
-|---|---|---|
-| `split` | new panes beside your own pane, in your workspace | 1-3 peers, short work, the user watches you work. Your pane keeps the focus. |
-| `workspace` (default) | new workspaces in your window | 3+ peers, or work that runs for minutes. The user's current screen stays clean, and one tab click reaches the fleet. |
-| `window` | a new window, with the workspaces inside it | a big fleet, a screen recording, or a second monitor. |
+| Placement | Where the peers land | On Linux (cmux-gtk) | Pick it when |
+|---|---|---|---|
+| `split` | new panes beside your own pane, in your workspace | yes | 1-3 peers, short work, the user watches you work. Your pane keeps the focus. |
+| `workspace` (default) | new workspaces in your window | yes | 3+ peers, or work that runs for minutes. The user's current screen stays clean, and one tab click reaches the fleet. |
+| `window` | a new window, with the workspaces inside it | **no** — the script stops with a clear error | a big fleet, a screen recording, or a second monitor. |
+
+The script reads which cmux it is talking to and speaks that grammar. Two Linux facts change how you drive it: cmux-gtk has no windows, and it builds a pane's terminal only while its window is on screen. A spawn started while the cmux window sits on a hidden desktop fails with a message that says so — bring the window up and run it again.
 
 Every other flag (`--direction`, `--focus`, `--per-workspace`, `--model`, `--claude-arg`, …) and the per-placement edge cases: read `references/placement.md`.
 
@@ -38,7 +40,16 @@ python3 ~/.claude/skills/peer-sessions/scripts/peer-addr.py --pid 66826 --json
 
 Filters preserve duplicate names by returning every matching PID. `--json` is the stable interface for scripts. A `?` row means a sandbox allowed the registry read but denied the active socket check; rerun with process/socket access before messaging.
 
-Sessions start with `--permission-mode auto`. This is the only mode that works with no human present. An `--allowedTools` list stalls on the first MCP tool that is not in the list. `--dangerously-skip-permissions` makes the receiver hold inbound messages for human approval. The peer then never sees your brief.
+**Spawn every peer in your own permission class.** A peer holds inbound messages for human approval when its class differs from the sender's, and your brief never reaches the model. Matching classes deliver straight through. So:
+
+| You are running | Spawn the fleet with |
+|---|---|
+| `--permission-mode auto` (or a default session) | nothing — `auto` is the default |
+| `--dangerously-skip-permissions` | `--permission-mode bypass` |
+
+`auto` is the mode that works with no human present, so prefer it for the whole rig when you get to choose. An `--allowedTools` list stalls on the first MCP tool that is not in the list, in either class.
+
+The script also clears `CLAUDE_CODE_CHILD_SESSION` and `CLAUDE_CODE_SESSION_ID` before each peer starts. A peer that inherits them registers nothing and stays unreachable. Spawn from a directory the user already trusts, or the peer stops on a folder-approval prompt instead of booting. Hand-launching a peer: read the launch-hygiene section of `references/manual-rig.md`.
 
 For unusual layouts, manual cmux work, or forks: read `references/manual-rig.md`.
 

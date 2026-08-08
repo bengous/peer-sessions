@@ -55,7 +55,7 @@ Then send each peer a brief that ends with your own address, and stop. A peer re
 |---|---|
 | `SKILL.md` | The happy path: spawn, brief, end turn, hand back the teardown |
 | `references/placement.md` | Every spawn flag, the placement edge cases, teardown syntax |
-| `references/manual-rig.md` | The cmux object model, `--id-format`, manual layouts, `--fork-session` |
+| `references/manual-rig.md` | Launch hygiene, the cmux object model, manual layouts on macOS and Linux, `--fork-session` |
 | `references/troubleshooting.md` | The four message checkpoints, the version wall, stale sockets, CLI traps |
 | `references/codex-bridge.md` | Reaching a Claude session from Codex through a real relay |
 | `scripts/spawn-fleet.py` | Launch N named sessions in your chosen layout, wait until each is addressable |
@@ -66,7 +66,8 @@ Then send each peer a brief that ends with your own address, and stop. A peer re
 ## Things that cost time to learn
 
 - **The first send with a bare name always bounces** with "re-send with the ref". That is a confirmation, not a failure. A `uds:` address does not bounce.
-- **Start peers in `--permission-mode auto`.** An `--allowedTools` list stalls on the first tool that is not in the list. `--dangerously-skip-permissions` makes the receiver *hold* inbound messages for human approval, so your brief never reaches the model.
+- **Start peers in your own permission class.** A receiver *holds* inbound messages for human approval when its class differs from the sender's, so the brief never reaches the model. From an ordinary session that means the default `auto`; from a `--dangerously-skip-permissions` session, pass `--permission-mode bypass`. An `--allowedTools` list stalls on the first tool that is not in the list, either way.
+- **A spawned peer must not inherit `CLAUDE_CODE_CHILD_SESSION`.** The script unsets it, along with `CLAUDE_CODE_SESSION_ID`, before each launch. A peer that keeps them registers nothing and cannot be addressed at all.
 - **`success: true` means the message arrived**, not that the peer did the work.
 - **A send is one-way.** If you want a reply, put your own address in the brief and ask for it.
 - **Teardown is opt-in.** Claude leaves the fleet running and gives you the commands. It only tears down when you ask, or when you said so up front at spawn time.

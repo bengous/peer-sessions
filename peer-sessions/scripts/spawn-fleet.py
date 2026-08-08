@@ -390,6 +390,12 @@ def build_splits_gtk(specs, launch_cmd, caller, direction, focus):
             surfaces.append(surface)
             start_session_gtk(surface, directory, launch_cmd(name))
         except RuntimeError as error:
+            # Hand the caller's own pane back first. Each split moved the focus
+            # onto a peer, and the user's next keystrokes must not land there.
+            try:
+                cmux_gtk("surface", "focus", caller["surface"])
+            except RuntimeError:
+                pass
             raise FleetError(str(error), layout) from error
         anchor = surface  # chain, so the panes line up in spec order
     # A split moves the focus onto the pane it just made, and the loop walked
@@ -500,10 +506,17 @@ def settle_focus(backend, layout, caller, focus):
             select_workspace_gtk(layout["workspaces"][0])
         else:
             cmux("select-workspace", "--workspace", layout["workspaces"][0])
-    elif backend == "gtk" and caller.get("workspace"):
+    elif backend == "gtk":
         # `workspace new` always selects what it creates, so cmux-gtk needs the
         # caller's workspace put back by hand to honour `--focus false`.
-        select_workspace_gtk(caller["workspace"])
+        if caller.get("workspace"):
+            select_workspace_gtk(caller["workspace"])
+        else:
+            print(
+                "note: --focus false was dropped: cmux never named a workspace "
+                "to go back to. The UI is on the fleet.",
+                file=sys.stderr,
+            )
 
 
 def main():
